@@ -1,0 +1,27 @@
+{
+  "env": {
+    "es6": true
+  },
+  "globals": {
+    "SpreadsheetApp": "readonly",
+    "DocumentApp": "readonly",
+    "HtmlService": "readonly",
+    "Logger": "readonly",
+    "LABEL_SPECS": "readonly",
+    "LABEL_COLUMN": "readonly",
+    "LABEL_START_ROW": "readonly"
+  },
+  "parserOptions": {
+    "ecmaVersion": 2019
+  },
+  "rules": {
+    "no-undef": "error",
+    "no-unused-vars": "off",
+    "no-unreachable": "error",
+    "no-duplicate-case": "error",
+    "no-constant-condition": "error",
+    "eqeqeq": ["error", "always"],
+    "no-var": "error",
+    "prefer-const": "warn"
+  }
+}

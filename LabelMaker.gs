@@ -1,235 +1,479 @@
 /**
  * ============================================================
- * Avery 5160/5260 Label Generator (Google Sheets → Google Docs)
+ * Avery Label Generator — LabelMaker.gs
  * ============================================================
  *
- * WHAT THIS DOES:
- * Creates a Google Doc formatted for Avery 5160/5260 labels (3 columns x 10 rows per page)
- * using address data from a Google Sheet. It automatically adjusts font size
- * to prevent text from wrapping within each label.
- *
- * NOTE: Avery 5160 and 5260 have identical dimensions (1" x 2.625", 30 per sheet).
- * This script works for both products.
+ * Generates a Google Doc formatted for Avery label sheets using
+ * address data from a Google Sheet. Supports 8 label formats
+ * (5160, 5260, 5161, 5162, 5163, 5164, 5167, 5195).
  *
  * HOW TO USE:
- * 1. In your Google Sheet:
- *    - Put your fully formatted label text in column B (starting at B2)
- *    - Each cell should already include line breaks using CHAR(10), e.g.:
+ * 1. Put label text in the configured column (default: column B, starting at B2).
+ *    Each cell should contain the full label with line breaks via CHAR(10), e.g.:
+ *      =A2&CHAR(10)&B2&CHAR(10)&C2
  *
- *      Name
- *      Street Address
- *      City, ST ZIP
+ * 2. Open Extensions → Apps Script, add Config.gs, LabelSpecs.gs, LabelMaker.gs.
  *
- * 2. Open Extensions → Apps Script
- * 3. Paste this script and save
- * 4. Run `createLabels`
- * 5. Open the generated Google Doc (check Logs if needed)
- * 6. Print with:
+ * 3. Reload the sheet — use the Avery Labels menu to run.
+ *
+ * 4. Print the generated Google Doc:
  *    - Scale: 100% (NO "fit to page")
  *    - Paper: Letter (8.5 x 11)
+ *    - Start from page 2 (page 1 is the summary)
  *
- * NOTES:
- * - Font size will shrink automatically if a line is too long
- * - Uses Arial for consistent width estimation
- * - Designed for Avery 5160 & 5260 (2.625" x 1" labels, 30 per sheet)
- *
- * REFERENCES:
- * - Avery 5160: https://www.avery.com/templates/5160
- * - Avery 5260: https://www.avery.com/templates/5260
- *
+ * FILES:
+ *   Config.gs     — column/row settings
+ *   LabelSpecs.gs — dimensions and font settings per Avery format
+ *   LabelMaker.gs — this file; all document generation logic
  * ============================================================
  */
 
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('Avery Labels')
-    .addItem('Create Labels', 'createLabels')
-    .addToUi();
+  const menu = SpreadsheetApp.getUi().createMenu('Avery Labels');
+  menu.addItem('Avery 5160 — address (2.625" × 1", 30/sheet)',         'createLabels_5160');
+  menu.addItem('Avery 5260 — address (2.625" × 1", 30/sheet)',         'createLabels_5260');
+  menu.addItem('Avery 5161 — address (4" × 1", 20/sheet)',             'createLabels_5161');
+  menu.addItem('Avery 5162 — address (4" × 1.33", 14/sheet)',          'createLabels_5162');
+  menu.addItem('Avery 5163 — shipping (4" × 2", 10/sheet)',            'createLabels_5163');
+  menu.addItem('Avery 5164 — shipping (4" × 3.33", 6/sheet)',          'createLabels_5164');
+  menu.addItem('Avery 5167 — return address (1.75" × 0.5", 80/sheet)', 'createLabels_5167');
+  menu.addItem('Avery 5195 — organization (1.75" × 0.67", 60/sheet)',  'createLabels_5195');
+  menu.addSeparator();
+  menu.addItem('All formats in one document',                           'createLabelsAllFormats');
+  menu.addToUi();
 }
 
 function onInstall(e) {
   onOpen(e);
 }
 
-function createLabels() {
-  const selectedLabelType = LABEL_TYPE;
+// One wrapper per format — Apps Script menu items require named top-level functions.
+function createLabels_5160() { createLabels('5160'); }
+function createLabels_5260() { createLabels('5260'); }
+function createLabels_5161() { createLabels('5161'); }
+function createLabels_5162() { createLabels('5162'); }
+function createLabels_5163() { createLabels('5163'); }
+function createLabels_5164() { createLabels('5164'); }
+function createLabels_5167() { createLabels('5167'); }
+function createLabels_5195() { createLabels('5195'); }
+
+// =============================================================
+// Single-format entry point
+// =============================================================
+
+function createLabels(selectedLabelType) {
   const spec = LABEL_SPECS[selectedLabelType];
   if (!spec) {
-    throw new Error(`Unknown label type: ${selectedLabelType}. Available types: ${Object.keys(LABEL_SPECS).join(', ')}`);
+    throw new Error(`Unknown label type: ${selectedLabelType}. Available: ${Object.keys(LABEL_SPECS).join(', ')}`);
   }
 
-  // Get active sheet and pull label text from configured column (see config.gs)
   const sheet = SpreadsheetApp.getActiveSheet();
   const sheetName = sheet.getName();
-  const lastRow = sheet.getLastRow();
-  const range = `${LABEL_COLUMN}${LABEL_START_ROW}:${LABEL_COLUMN}${lastRow}`;
-  
-  Logger.log(`📋 Starting label generation from sheet: "${sheetName}"`);
-  Logger.log(`📍 Reading data from range: ${range}`);
-  
-  const data = sheet
-    .getRange(range)
-    .getValues()
-    .flat()
-    .filter(String) // remove empty rows
-    .map(text => normalizeLabelText(text))
-    .filter(text => text.length > 0); // remove rows that were only whitespace or blank lines
+  const data = readLabelData(sheet);
+  const dateTimeStr = formatDateTime(new Date());
 
+  Logger.log(`📋 Starting label generation from sheet: "${sheetName}"`);
   Logger.log(`✓ Found ${data.length} labels to process`);
 
-  // Format current date/time for document name
-  const now = new Date();
-  const dateTimeStr = now.toLocaleString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: true
-  });
-  
   const docName = `Avery Labels - ${sheetName} - ${selectedLabelType} - ${dateTimeStr}`;
-  
   Logger.log(`📄 Creating document: "${docName}"`);
 
-  // Create a new Google Doc
   const doc = DocumentApp.create(docName);
   const body = doc.getBody();
 
-  // Set page margins (points: 72 = 1 inch)
-  body.setMarginTop(36);       // 0.5"
-  body.setMarginBottom(36);    // 0.5"
-  body.setMarginLeft(13.5);    // 0.1875"
-  body.setMarginRight(13.5);   // 0.1875"
-  
-  Logger.log(`⚙️  Setting page margins and label dimensions`);
+  // Page 1: summary. Normal margins so the summary reads cleanly.
+  // The mandatory Google Docs leading paragraph lives here, keeping it
+  // off the label pages entirely.
+  body.setMarginTop(72);
+  body.setMarginBottom(72);
+  body.setMarginLeft(72);
+  body.setMarginRight(72);
 
-  // Actual usable text width after padding
-  const USABLE_WIDTH_PT = spec.widthPt - spec.paddingLeftPt - spec.paddingRightPt;
+  buildSummaryPage(body, data, sheetName, selectedLabelType, spec, dateTimeStr);
 
-  // Create table (we will add rows of labels each)
-  const table = body.appendTable();
-  if (typeof table.setBorderWidth === 'function') {
-    table.setBorderWidth(0);
-  }
-  if (typeof table.setBorderColor === 'function') {
-    table.setBorderColor('#ffffff');
-  }
-  if (typeof table.setBorderStyle === 'function') {
-    table.setBorderStyle(DocumentApp.BorderStyle.NONE);
+  // Page 2+: labels. Switch to Avery margins before appending the table.
+  // The page break from buildSummaryPage() ensures label rows start at the
+  // correct top margin with no leading paragraph offset.
+  body.setMarginTop(spec.marginTopPt);
+  body.setMarginBottom(spec.marginBottomPt);
+  body.setMarginLeft(spec.marginLeftPt);
+  body.setMarginRight(spec.marginRightPt);
+
+  appendLabelRows(body, data, spec);
+
+  Logger.log(`📊 Document contains ~${Math.ceil(data.length / spec.labelsPerPage)} label page(s)`);
+
+  doc.saveAndClose();
+  const docUrl = doc.getUrl();
+  Logger.log(`✅ SUCCESS! Document created: ${docUrl}`);
+
+  showDocumentLink(docUrl, 'Labels created!');
+  return docUrl;
+}
+
+// =============================================================
+// All-formats entry point
+// =============================================================
+
+function createLabelsAllFormats() {
+  const sheet = SpreadsheetApp.getActiveSheet();
+  const sheetName = sheet.getName();
+  const data = readLabelData(sheet);
+  const dateTimeStr = formatDateTime(new Date());
+
+  Logger.log(`📋 All-formats run: ${data.length} labels from "${sheetName}"`);
+
+  const docName = `Avery Labels - ${sheetName} - All Formats - ${dateTimeStr}`;
+  const doc = DocumentApp.create(docName);
+  const body = doc.getBody();
+
+  const formatKeys = Object.keys(LABEL_SPECS);
+  for (let f = 0; f < formatKeys.length; f++) {
+    const spec = LABEL_SPECS[formatKeys[f]];
+    const labelPages = Math.ceil(data.length / spec.labelsPerPage);
+
+    Logger.log(`⚙️  Writing ${spec.name} (~${labelPages} page(s))`);
+
+    // Header page — normal margins so text reads cleanly.
+    body.setMarginTop(72);
+    body.setMarginBottom(72);
+    body.setMarginLeft(72);
+    body.setMarginRight(72);
+
+    buildFormatHeaderPage(body, spec, data.length, labelPages, dateTimeStr, sheetName, f === 0);
+
+    // Label pages — switch to this format's Avery margins.
+    body.setMarginTop(spec.marginTopPt);
+    body.setMarginBottom(spec.marginBottomPt);
+    body.setMarginLeft(spec.marginLeftPt);
+    body.setMarginRight(spec.marginRightPt);
+
+    appendLabelRows(body, data, spec);
+
+    // Page break between formats (not after the last one).
+    if (f < formatKeys.length - 1) {
+      body.appendParagraph('');
+      body.appendPageBreak();
+    }
   }
 
-  // Loop through labels in groups (configured columns per row)
-  let processedCount = 0;
+  doc.saveAndClose();
+  const docUrl = doc.getUrl();
+  Logger.log(`✅ All-formats document created: ${docUrl}`);
+
+  showDocumentLink(docUrl, 'Labels created!');
+}
+
+// =============================================================
+// Document building
+// =============================================================
+
+/**
+ * Appends a full set of label rows to body for the given data and spec.
+ * Used by both single-format and all-formats flows.
+ *
+ * Labels are laid out in a single borderless table. Spacer cells between
+ * label cells provide the column gap. Row height matches spec.heightPt so
+ * Google Docs' natural pagination aligns rows to each new label sheet
+ * without explicit page breaks (which caused blank pages when a table ended
+ * exactly at the bottom of a page).
+ */
+function appendLabelRows(body, data, spec) {
+  const usableWidthPt = spec.widthPt - spec.paddingLeftPt - spec.paddingRightPt;
+  const table = createLabelTable(body);
+
   for (let i = 0; i < data.length; i += spec.columnsPerRow) {
     const row = table.appendTableRow();
+    if (typeof row.setMinimumHeight === 'function') row.setMinimumHeight(spec.heightPt);
+    if (typeof row.setAllowBreakAcrossPages === 'function') row.setAllowBreakAcrossPages(false);
 
     for (let c = 0; c < spec.columnsPerRow; c++) {
-      const text = data[i + c] || ""; // handle last row if not multiple of 3
+      const text = data[i + c] || '';
 
-      // Create cell and apply layout settings
       const cell = row.appendTableCell(text);
       cell.setWidth(spec.widthPt);
       cell.setVerticalAlignment(DocumentApp.VerticalAlignment.TOP);
-
-      // Remove visible table borders for printable labels if supported
-      if (typeof cell.setBorderWidth === 'function') {
-        cell.setBorderWidth(0);
-      }
-      if (typeof cell.setBorderColor === 'function') {
-        cell.setBorderColor('#ffffff');
-      }
-
-      // Tight padding helps prevent unnecessary wrapping
+      if (typeof cell.setMinimumHeight === 'function') cell.setMinimumHeight(spec.heightPt);
+      if (typeof cell.setBorderWidth === 'function') cell.setBorderWidth(0);
+      if (typeof cell.setBorderColor === 'function') cell.setBorderColor('#ffffff');
       cell.setPaddingTop(spec.paddingTopPt);
       cell.setPaddingBottom(spec.paddingBottomPt);
       cell.setPaddingLeft(spec.paddingLeftPt);
       cell.setPaddingRight(spec.paddingRightPt);
+      // appendTableCell splits \n into paragraphs. Without zeroing their
+      // spacing, accumulated paragraph spacing pushes rows past spec.heightPt,
+      // causing fewer rows per page than the label sheet expects.
+      setCellParagraphSpacing(cell);
+
+      if (c < spec.columnsPerRow - 1) {
+        const spacer = row.appendTableCell('');
+        spacer.setWidth(spec.columnGapPt);
+        if (typeof spacer.setMinimumHeight === 'function') spacer.setMinimumHeight(spec.heightPt);
+        if (typeof spacer.setBorderWidth === 'function') spacer.setBorderWidth(0);
+        if (typeof spacer.setBorderColor === 'function') spacer.setBorderColor('#ffffff');
+        setCellParagraphSpacing(spacer);
+      }
 
       if (text) {
-        // Pick the largest font size that avoids wrapping
-        const fontSize = pickFontSizeToAvoidWrap(text, USABLE_WIDTH_PT, spec);
-
+        const fontSize = pickFontSizeToAvoidWrap(text, usableWidthPt, spec);
         const edit = cell.editAsText();
-        edit.setFontFamily("Arial");  // consistent font for width estimation
+        edit.setFontFamily('Arial');
         edit.setFontSize(fontSize);
-        
-        processedCount++;
       }
     }
   }
-
-  Logger.log(`✓ Processed ${processedCount} labels into table format`);
-  Logger.log(`📊 Document contains ${Math.ceil(processedCount / 30)} page(s)`);
-
-  // Log the generated document URL
-  const docUrl = doc.getUrl();
-  Logger.log(`✅ SUCCESS! Document created: ${docUrl}`);
-  return docUrl;
 }
 
+function buildSummaryPage(body, data, sheetName, labelType, spec, dateTimeStr) {
+  const labelPages = Math.ceil(data.length / spec.labelsPerPage);
+
+  // Reuse the mandatory leading paragraph Google Docs inserts into every new doc.
+  const title = body.getParagraphs()[0];
+  title.editAsText().setText('Avery Label Print Summary');
+  title.setHeading(DocumentApp.ParagraphHeading.HEADING1);
+
+  const addPara = (text, bold) => {
+    const p = body.appendParagraph(text);
+    p.setHeading(DocumentApp.ParagraphHeading.NORMAL);
+    if (bold) p.editAsText().setBold(true);
+    return p;
+  };
+
+  addPara('Before you print — avoid wasting a label sheet:', true);
+  addPara('  1. Print starting from page 2. This page is not a label page.');
+  addPara('  2. Set print scale to exactly 100%. Do NOT use "Fit to page".');
+  addPara('  3. Set paper size to Letter (8.5 × 11 in).');
+  addPara('  4. Do a test print on plain paper first. Hold it up to a label sheet against a window to check alignment before printing on labels.');
+  addPara('  5. Review any warnings at the bottom of this page before printing.');
+
+  addPara('');
+  addPara(`Generated: ${dateTimeStr}`);
+  addPara(`Source sheet: ${sheetName}`);
+  addPara(`Label type: Avery ${labelType}`);
+  addPara(`Total labels: ${data.length}`);
+  addPara(`Label pages: ${labelPages} (print starting from page 2)`);
+
+  // Recipients by state
+  const byState = {};
+  data.forEach(text => {
+    const lastLine = text.split('\n').filter(Boolean).pop() || '';
+    const m = lastLine.match(/,\s*([A-Z]{2})\s+[\d-]+$/);
+    if (m) byState[m[1]] = (byState[m[1]] || 0) + 1;
+  });
+  addPara('');
+  addPara('Recipients by state:', true);
+  appendColumnarTable(body, Object.keys(byState).sort().map(k => `${k}: ${byState[k]}`), 3);
+
+  // Recipients by city, state
+  const byCity = {};
+  data.forEach(text => {
+    const lastLine = text.split('\n').filter(Boolean).pop() || '';
+    const m = lastLine.match(/^(.+),\s*([A-Z]{2})\s+[\d-]+$/);
+    if (m) {
+      const key = `${m[1].trim()}, ${m[2]}`;
+      byCity[key] = (byCity[key] || 0) + 1;
+    }
+  });
+  addPara('');
+  addPara('Recipients by city:', true);
+  appendColumnarTable(body, Object.keys(byCity).sort().map(k => `${k}: ${byCity[k]}`), 3);
+
+  // Warning: single-line labels (likely missing address lines)
+  const singles = data.map((text, i) => ({ i, text })).filter(({ text }) => text.split('\n').length === 1);
+  if (singles.length > 0) {
+    addPara('');
+    addPara(`⚠️  Labels with only one line — possible missing address (${singles.length}):`, true);
+    singles.forEach(({ i, text }) => addPara(`  Label ${i + 1}: "${text}"`));
+  }
+
+  // Warning: missing ZIP code
+  const noZip = data.map((text, i) => ({ i, text })).filter(({ text }) => {
+    const lastLine = text.split('\n').filter(Boolean).pop() || '';
+    return !/\d{5}/.test(lastLine);
+  });
+  if (noZip.length > 0) {
+    addPara('');
+    addPara(`⚠️  Labels with missing or invalid ZIP code (${noZip.length}):`, true);
+    noZip.forEach(({ i, text }) => {
+      const lastLine = text.split('\n').filter(Boolean).pop() || '';
+      addPara(`  Label ${i + 1}: "${lastLine}"`);
+    });
+  }
+
+  // appendPageBreak() requires a paragraph as the last body element —
+  // it throws if called after a table.
+  body.appendParagraph('');
+  body.appendPageBreak();
+}
+
+function buildFormatHeaderPage(body, spec, totalLabels, labelPages, dateTimeStr, sheetName, isFirst) {
+  // For the first format, reuse the mandatory leading paragraph rather than
+  // appending a new one (avoids a blank line at the top of the document).
+  let title;
+  if (isFirst) {
+    title = body.getParagraphs()[0];
+    title.editAsText().setText(spec.name);
+  } else {
+    title = body.appendParagraph(spec.name);
+  }
+  title.setHeading(DocumentApp.ParagraphHeading.HEADING1);
+
+  const addPara = (text, bold) => {
+    const p = body.appendParagraph(text);
+    p.setHeading(DocumentApp.ParagraphHeading.NORMAL);
+    if (bold) p.editAsText().setBold(true);
+    return p;
+  };
+
+  addPara(`${spec.widthPt / 72}" × ${(spec.heightPt / 72).toFixed(3)}" — ${spec.columnsPerRow} columns × ${spec.rowsPerPage} rows — ${spec.labelsPerPage} labels/sheet`);
+  addPara('');
+  addPara(`Source sheet: ${sheetName}`);
+  addPara(`Generated: ${dateTimeStr}`);
+  addPara(`Total labels: ${totalLabels}`);
+  addPara(`Label pages: ${labelPages}`);
+  addPara('');
+  addPara('Print instructions:', true);
+  addPara('  • Scale: 100% — do NOT use "Fit to page"');
+  addPara('  • Paper: Letter (8.5 × 11 in)');
+  addPara('  • Labels start on the next page');
+
+  body.appendParagraph('');
+  body.appendPageBreak();
+}
+
+// =============================================================
+// Table helpers
+// =============================================================
+
+function createLabelTable(body) {
+  const table = body.appendTable();
+  if (typeof table.setBorderWidth === 'function') table.setBorderWidth(0);
+  if (typeof table.setBorderColor === 'function') table.setBorderColor('#ffffff');
+  if (typeof table.setBorderStyle === 'function') table.setBorderStyle(DocumentApp.BorderStyle.NONE);
+  return table;
+}
+
+function appendColumnarTable(body, items, numCols) {
+  if (items.length === 0) {
+    body.appendParagraph('  (none)').setHeading(DocumentApp.ParagraphHeading.NORMAL);
+    return;
+  }
+  const table = body.appendTable();
+  if (typeof table.setBorderWidth === 'function') table.setBorderWidth(0);
+  const rowCount = Math.ceil(items.length / numCols);
+  for (let r = 0; r < rowCount; r++) {
+    const row = table.appendTableRow();
+    for (let c = 0; c < numCols; c++) {
+      const text = items[r + c * rowCount] || '';
+      const cell = row.appendTableCell(text);
+      if (typeof cell.setBorderWidth === 'function') cell.setBorderWidth(0);
+      cell.setPaddingTop(1);
+      cell.setPaddingBottom(1);
+      cell.setPaddingLeft(4);
+      cell.setPaddingRight(4);
+      setCellParagraphSpacing(cell);
+      if (text) cell.editAsText().setFontSize(10);
+    }
+  }
+}
+
+function setCellParagraphSpacing(cell) {
+  for (let i = 0; i < cell.getNumChildren(); i++) {
+    const child = cell.getChild(i);
+    if (child.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      child.asParagraph().setAttributes({
+        [DocumentApp.Attribute.SPACING_BEFORE]: 0,
+        [DocumentApp.Attribute.SPACING_AFTER]: 0,
+        [DocumentApp.Attribute.LINE_SPACING]: 1.0
+      });
+    }
+  }
+}
+
+// =============================================================
+// Font sizing
+// =============================================================
 
 /**
- * Determines the largest font size that allows all lines
- * to fit within the available width (avoiding wrapping).
+ * Returns the largest font size at which every line of text fits within
+ * maxWidthPt * spec.fontSizeBuffer points. Falls back to spec.fontSizeMin
+ * if nothing fits or the hard character limit is exceeded.
  */
 function pickFontSizeToAvoidWrap(text, maxWidthPt, spec) {
-  // Split text into lines based on explicit line breaks
-  const lines = text
-    .split('\n')
-    .map(line => line.trim())
-    .filter(Boolean);
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-  // If any line exceeds the hard character limit, force the minimum size.
-  if (spec.hardCharacterLimit && lines.some(line => line.length > spec.hardCharacterLimit)) {
+  if (spec.hardCharacterLimit && lines.some(l => l.length > spec.hardCharacterLimit)) {
     return spec.fontSizeMin;
   }
 
-  // Find the longest line
-  const longestLine = lines.reduce((max, line) => 
-    line.length > max.length ? line : max, '');
-
-  // Try font sizes from largest to smallest
   for (let fontSize = spec.fontSizeMax; fontSize >= spec.fontSizeMin; fontSize--) {
-    // Check if every line fits within allowed width (safety buffer for consistency)
-    const allFit = lines.every(line =>
-      estimateLineWidthPt(line, fontSize) <= maxWidthPt * spec.fontSizeBuffer
-    );
-
-    if (allFit) return fontSize;
-  }
-
-  // Fallback to consistent minimum
-  return spec.fontSizeMin;
-}
-
-
-/**
- * Roughly estimates how wide a line of text will be in points.
- * This is NOT exact, but good enough to prevent most wrapping.
- */
-function estimateLineWidthPt(line, fontSize) {
-  let units = 0;
-
-  for (const ch of line) {
-    if (ch === ' ') {
-      units += 0.33; // spaces are narrow
-    } else if ('ilI.,:;|!\'`'.includes(ch)) {
-      units += 0.28; // very narrow characters
-    } else if ('fjrtJ()[]{}'.includes(ch)) {
-      units += 0.4;  // narrow-medium characters
-    } else if ('MW@#%&QGOM'.includes(ch)) {
-      units += 0.9;  // wide characters
-    } else if ('0123456789'.includes(ch)) {
-      units += 0.56; // numbers
-    } else if ('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.includes(ch)) {
-      units += 0.68; // uppercase letters
-    } else {
-      units += 0.56; // default for lowercase letters
+    if (lines.every(l => estimateLineWidthPt(l, fontSize) <= maxWidthPt * spec.fontSizeBuffer)) {
+      return fontSize;
     }
   }
 
-  // Convert unit count into points using font size
+  return spec.fontSizeMin;
+}
+
+/**
+ * Estimates line width in points using per-character width multipliers for Arial.
+ * Not exact, but accurate enough when combined with spec.fontSizeBuffer.
+ */
+function estimateLineWidthPt(line, fontSize) {
+  let units = 0;
+  for (const ch of line) {
+    if      (ch === ' ')                        units += 0.33;
+    else if ('ilI.,:;|!\'`'.includes(ch))       units += 0.28;
+    else if ('fjrtJ()[]{}'.includes(ch))        units += 0.40;
+    else if ('MW@#%&QGOM'.includes(ch))         units += 0.90;
+    else if ('0123456789'.includes(ch))         units += 0.56;
+    else if ('ABCDEFGHIJKLMNOPQRSTUVWXYZ'.includes(ch)) units += 0.68;
+    else                                        units += 0.56;
+  }
   return units * fontSize;
+}
+
+// =============================================================
+// Data helpers
+// =============================================================
+
+function readLabelData(sheet) {
+  const lastRow = sheet.getLastRow();
+  const range = `${LABEL_COLUMN}${LABEL_START_ROW}:${LABEL_COLUMN}${lastRow}`;
+  Logger.log(`📍 Reading data from range: ${range}`);
+  return sheet
+    .getRange(range)
+    .getValues()
+    .flat()
+    .filter(String)
+    .map(normalizeLabelText)
+    .filter(text => text.length > 0);
+}
+
+function normalizeLabelText(text) {
+  return text.toString().split('\n').map(l => l.trim()).filter(Boolean).join('\n');
+}
+
+function formatDateTime(date) {
+  return date.toLocaleString('en-US', {
+    year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+  });
+}
+
+// =============================================================
+// UI helpers
+// =============================================================
+
+function showDocumentLink(docUrl, title) {
+  const html = HtmlService.createHtmlOutput(
+    `<p style="font-family:Arial;font-size:14px">
+       Your label document is ready.<br><br>
+       <a href="${docUrl}" target="_blank" style="font-size:16px">Open document</a>
+     </p>
+     <p style="font-family:Arial;font-size:11px;color:#666">
+       (If the link doesn't open, copy the URL from the execution log.)
+     </p>`
+  ).setWidth(350).setHeight(120);
+  SpreadsheetApp.getUi().showModalDialog(html, title);
 }
