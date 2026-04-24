@@ -1,6 +1,6 @@
-# Avery 5160/5260 Label Generator
+# Avery Label Generator
 
-A Google Apps Script that converts address data from a Google Sheet into a professionally formatted Google Doc ready for printing on Avery 5160 or 5260 labels.
+A Google Apps Script that converts address data from a Google Sheet into a professionally formatted Google Doc ready for printing on Avery labels.
 
 ---
 
@@ -9,9 +9,10 @@ A Google Apps Script that converts address data from a Google Sheet into a profe
 Printing address labels for mass mailings is tedious and error-prone. Mail merge tools are often clunky or expensive. This script automates the entire process:
 
 - **Import data from Google Sheets** → Your contact list stays organized and editable
-- **Auto-format for Avery 5160/5260** → No manual layout adjustments needed
+- **Auto-format for 5 Avery label sizes** → No manual layout adjustments needed
 - **Smart font sizing** → Text automatically shrinks to fit each label without wrapping
 - **Print-ready output** → Generate a Google Doc that lines up perfectly with label sheets
+- **No third-party access** → Unlike marketplace add-ons, this script never requires broad Google Drive permissions
 
 Perfect for: holiday cards, newsletters, fundraising campaigns, or any bulk mailing.
 
@@ -19,12 +20,13 @@ Perfect for: holiday cards, newsletters, fundraising campaigns, or any bulk mail
 
 ## Features
 
-✓ **3 columns × 10 rows per page** (30 labels per page)  
-✓ **Automatic font sizing** (9-11pt) to prevent text wrapping  
-✓ **Character-width estimation** for accurate text fitting  
-✓ **TOP vertical alignment** for consistent label appearance  
-✓ **Multi-line support** with CHAR(10) line breaks  
-✓ **Generates new Google Doc** (never overwrites existing files)  
+✓ **8 Avery label formats** supported (5160, 5260, 5161, 5162, 5163, 5164, 5167, 5195)
+✓ **Automatic font sizing** to prevent text wrapping per label size
+✓ **Character-width estimation** for accurate text fitting
+✓ **TOP vertical alignment** for consistent label appearance
+✓ **Multi-line support** with CHAR(10) line breaks
+✓ **Generates new Google Doc** (never overwrites existing files)
+✓ **Summary page** with recipient counts by state and city, plus data warnings
 
 ---
 
@@ -36,20 +38,16 @@ In your Google Sheet, add label text to **Column B** starting at **B2**:
 
 ```
 Column B (starting at B2):
-Morse Family
-17266 153rd St SE
-Monroe, WA 98272
+Smith Family
+123 Main St
+Springfield, IL 62701
 
-Gloria Runte
-1805 Village Green Dr Apt 21
-Mill Creek, WA 98012
-
-Gary Mansell and Ginger Keel
-8709 Vashon Ct NE
-Lacey, WA 98516
+Jane Doe
+456 Elm Ave Apt 7
+Shelbyville, IL 62565
 ```
 
-**Important:** Each cell should contain the complete label text with line breaks included using `CHAR(10)`. Example formula:
+**Important:** Each cell should contain the complete label text with line breaks using `CHAR(10)`. Example formula:
 
 ```
 =A2&CHAR(10)&B2&CHAR(10)&C2
@@ -59,25 +57,47 @@ Lacey, WA 98516
 
 1. Open your Google Sheet
 2. Click **Extensions → Apps Script**
-3. Copy the contents of `Label Maker.gs` into the editor
+3. Create three script files and paste the contents of each:
+   - `Config.gs` — column/row settings and label type selection
+   - `LabelSpecs.gs` — Avery label dimensions (widths, gaps, font range)
+   - `LabelMaker.gs` — main script logic
 4. Save the project (give it a name like "Avery Label Maker")
 
 ### 3. Run the Script
 
-1. Select the `createLabels` function from the dropdown
-2. Click the **Run** (Play) button
+1. Reload the Google Sheet — an **Avery Labels** menu will appear in the menu bar
+2. Click **Avery Labels** and choose your label format, e.g. **Avery 5160**
+   - Or choose **All formats in one document** to generate all 5 formats in a single doc (useful for comparing alignment across label sizes)
 3. **Authorize** the script when prompted
-4. Check the **Execution log** for your new Google Doc URL
+4. When complete, a dialog will appear with a link to the generated Google Doc
 
 ### 4. Print Your Labels
 
 1. Open the generated Google Doc
-2. Go to **File → Print Settings**
+2. Go to **File → Print**
 3. Set:
    - **Scale:** 100% (NO "fit to page")
    - **Paper size:** Letter (8.5 × 11 in)
    - **Margins:** None or minimal
-4. Load your Avery 5160 label sheet and print!
+4. **Print starting from page 2** — page 1 is the summary page, not labels
+5. Load your Avery label sheet and print
+
+---
+
+## Summary Page
+
+The first page of every generated document is a summary, not labels. This is intentional: Google Docs always inserts a mandatory paragraph at the start of the document body that cannot be removed via Apps Script. If the label table started on page 1, that paragraph would consume ~13pt of space and cause only 9 rows (27 labels) to fit instead of 10 (30 labels). Placing the summary page first absorbs that paragraph, so every label page starts cleanly and consistently prints 30 labels.
+
+The summary includes:
+
+- Generated date/time, source sheet name, label type
+- Total label count and number of label pages
+- Recipients by state (3-column layout)
+- Recipients by city and state (3-column layout)
+- Warnings for labels with only one line (possible missing address)
+- Warnings for labels with no ZIP code detected
+
+**Always print starting from page 2.**
 
 ---
 
@@ -90,16 +110,26 @@ The script uses character-width estimation to determine the largest font size th
 ```
 1. Split label text into lines (by \n)
 2. For each font size from 11pt down to 9pt:
-   - Estimate width of each line
-   - Check if all lines fit in 189 points (2.625")
-   - Return the first size that fits (with 15% safety buffer)
+   - Estimate width of each line in points
+   - Check if all lines fit within 75% of usable label width (25% safety margin)
+   - Return the first size where all lines fit
 3. Apply selected font size to label
 ```
 
-This ensures:
-- **Consistency** across all labels
-- **Readability** at a reasonable size
-- **No wrapped text** that breaks label formatting
+The 25% safety margin accounts for the gap between the width estimator's heuristic values and actual Arial rendering.
+
+### Page Layout
+
+Labels are placed in a single borderless table starting on page 2 (after the summary page). Each row contains 3 label cells separated by 9pt (0.125") spacer cells:
+
+```
+| 13.5pt margin | 189pt label | 9pt gap | 189pt label | 9pt gap | 189pt label | 13.5pt margin |
+= 612pt = 8.5"
+```
+
+Rows are set to `setAllowBreakAcrossPages(false)` so they always move as a unit to the next page. Since 10 rows × 72pt = 720pt = the page height minus margins exactly, rows paginate naturally to each new Avery sheet without explicit page breaks.
+
+The summary page on page 1 absorbs the mandatory Google Docs leading paragraph (which cannot be removed via Apps Script), so all label pages start with a clean 36pt top margin and consistent 30-label alignment.
 
 ### Width Estimation Formula
 
@@ -111,126 +141,87 @@ Text width is estimated using character-specific multipliers:
 | Very narrow | 0.28 | `i`, `l`, `.` |
 | Narrow | 0.40 | `f`, `j`, `(`, `)` |
 | Wide | 0.90 | `M`, `W`, `@` |
-| Numbers | 0.56 | `0-9` |
-| Uppercase | 0.68 | `A-Z` |
-| Lowercase | 0.56 | `a-z` (default) |
-
-Example: "Hello" in 11pt
-- H(0.68) + e(0.56) + l(0.28) + l(0.28) + o(0.56) = 2.36 units
-- 2.36 × 11 = **25.96 points**
+| Numbers | 0.56 | `0–9` |
+| Uppercase | 0.68 | `A–Z` |
+| Lowercase | 0.56 | `a–z` (default) |
 
 ---
 
 ## Technical Specifications
 
-### Avery 5160 & 5260 Specs (Identical)
-- **Label size:** 2.625" × 1" (189pt × 72pt)
-- **Layout:** 3 columns × 10 rows per page
-- **Total per page:** 30 labels
-- **Paper size:** Letter (8.5" × 11")
+### Supported Label Formats
 
-### Margin Settings
-- **Top/Bottom:** 0.5" (36pt)
-- **Left/Right:** 0.1875" (13.5pt)
-- **Per-label padding:** 6pt left/right, 2pt top/bottom
+| Format | Description | Size | Layout | Per sheet |
+|--------|-------------|------|--------|-----------|
+| **5160** | Address labels | 2.625" × 1" | 3 × 10 | 30 |
+| **5260** | Address labels (clear) | 2.625" × 1" | 3 × 10 | 30 |
+| **5163** | Shipping labels | 4" × 2" | 2 × 5 | 10 |
+| **5164** | Large shipping labels | 4" × 3.33" | 2 × 3 | 6 |
+| **5167** | Return address labels | 1.75" × 0.5" | 4 × 20 | 80 |
+| **5161** | Address labels | 4" × 1" | 2 × 10 | 20 |
+| **5162** | Address labels | 4" × 1.33" | 2 × 7 | 14 |
+| **5195** | Organization labels | 1.75" × 0.67" | 4 × 15 | 60 |
 
-### Font Settings
-- **Font family:** Arial (monospaced width calculation)
-- **Font size range:** 9-11pt (optimized for label readability)
-- **Vertical alignment:** TOP (prevents text from centering)
+All formats use Letter paper (8.5" × 11"). Font size range and padding are tuned per format in `LabelSpecs.gs`.
+
+### Per-Label Settings (all formats)
+- **Font family:** Arial
+- **Vertical alignment:** TOP
 
 ---
 
 ## Troubleshooting
 
-### Document is too large (many pages)
-**Cause:** Too many labels being generated  
-**Fix:** Verify you're only reading rows with data. The script filters empty rows automatically with `.filter(String)`.
-
 ### Text is wrapping within labels
-**Cause:** Width estimation underestimated text length  
-**Fix:** The 15% safety buffer helps, but very long lines may still wrap. Try shorter addresses or wider label text.
+**Cause:** Width estimation underestimated text length
+**Fix:** The 25% safety margin helps, but very long lines may still wrap. Try shortening address lines or lowering `fontSizeBuffer` in `LabelSpecs.gs` (lower = more conservative).
 
-### Font sizes are inconsistent
-**Cause:** Character width estimation is approximate, not exact  
-**Fix:** This is expected with manual width estimation. For perfect consistency, you'd need Google Docs' exact rendering engine (not available in Apps Script).
-
-### Script fails to authorize
-**Cause:** Google Apps Script permissions required  
-**Fix:** Click "Review Permissions" and authorize access to Google Sheets and Docs.
+### Font sizes are inconsistent across labels
+**Cause:** Character width estimation is approximate — different label lengths land on different sizes
+**Fix:** Expected behavior. For perfect consistency you'd need the actual rendering engine, which isn't accessible in Apps Script.
 
 ### Document won't align with label sheet
-**Cause:** Print scale or margins incorrect  
-**Fix:** Ensure:
-1. Print scale is **100%** (not "Fit to page")
-2. Margins are set to **None**
-3. Paper size is **Letter (8.5 × 11")**
+**Cause:** Print scale or margins are incorrect
+**Fix:** Ensure print scale is **100%** (not "Fit to page"), paper size is **Letter**, and you are printing **starting from page 2**.
+
+### Script fails to authorize
+**Cause:** Google Apps Script requires permissions to access Sheets and Docs
+**Fix:** Click "Review Permissions" and authorize when prompted.
 
 ---
 
-## Testing
+## Configuration
 
-Unit tests are included in `Label Maker Test.gs`. Run `testAll()` to validate:
+Edit `Config.gs` to change defaults:
 
-- ✓ Character width calculations
-- ✓ Font size selection algorithm
-- ✓ Multi-line text handling
-- ✓ Edge cases (empty text, very long lines, etc.)
+| Constant | Default | Purpose |
+|----------|---------|---------|
+| `LABEL_COLUMN` | `"B"` | Sheet column containing label text |
+| `LABEL_START_ROW` | `2` | First row with label data (skips header) |
 
-To run tests:
-1. Open the Apps Script editor
-2. Select `testAll` from the function dropdown
-3. Click **Run**
-4. Check **Execution log** for results
-
----
-
-## Code Review Summary
-
-**Strengths:**
-- Clear separation of concerns (width estimation, font sizing, Google Docs integration)
-- Well-documented with inline comments
-- Handles edge cases (empty cells, non-multiple-of-3 labels)
-- Consistent formatting with constants at the top
-
-**Areas for Improvement:**
-- Width estimation is approximate (±5-10% accuracy vs. actual Arial rendering)
-- No error handling if Sheet is empty or malformed
-- Font sizes hardcoded (9-11pt range) rather than parameterized
-- Could benefit from batch operations for large label counts
-
-**Potential Enhancements:**
-- Add user configuration options (font size range, safety buffer %)
-- Support for multiple columns/formats in Sheet
-- Add logging for debugging failed labels
-- Cache width calculations for repeated text
-
----
-
-## License
-
-Use freely for personal and commercial purposes. No attribution required.
+To add support for other Avery label sizes, add a new entry to `LABEL_SPECS` in `LabelSpecs.gs`, then add a menu item and a one-line wrapper function in `LabelMaker.gs`.
 
 ---
 
 ## Important Note
 
-**Avery 5160 and 5260 are identical products** with the same dimensions and layout:
-- **1" × 2.625"** labels
-- **3 columns × 10 rows** per page (30 labels per sheet)
-
-This script works for **both product numbers**. The difference between them is in the paper finish or branding, not the label size or layout.
+**Avery 5160 and 5260 are identical products** — same dimensions, same layout. The difference is paper finish (5160 is matte white, 5260 is clear).
 
 ---
 
 ## Resources
 
-- [Avery 5160 Template & Product Info](https://www.avery.com/templates/5160) - Official Avery page
-- [Avery 5260 Template & Product Info](https://www.avery.com/templates/5260) - Official Avery page  
-- [Avery Label Size Chart](https://www.avery.com/blank/resources/container-sizes) - Reference for other label sizes
+- [Avery 5160 Template](https://www.avery.com/templates/5160)
+- [Avery 5260 Template](https://www.avery.com/templates/5260)
+- [Avery 5161 Template](https://www.avery.com/templates/5161)
+- [Avery 5162 Template](https://www.avery.com/templates/5162)
+- [Avery 5163 Template](https://www.avery.com/templates/5163)
+- [Avery 5164 Template](https://www.avery.com/templates/5164)
+- [Avery 5167 Template](https://www.avery.com/templates/5167)
+- [Avery 5195 Template](https://www.avery.com/templates/5195)
 
 ---
 
-## Questions?
+## License
 
-Check the inline comments in `Label Maker.gs` for implementation details. The script is ~160 lines and relatively straightforward.
+MIT © Brian Mansell
