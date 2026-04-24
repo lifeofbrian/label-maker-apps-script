@@ -203,6 +203,21 @@ To add support for other Avery label sizes, add a new entry to `LABEL_SPECS` in 
 
 ---
 
+## Development
+
+### Linting
+
+ESLint is configured to catch errors in the `.gs` files. To run locally:
+
+```bash
+npm install
+npm run lint
+```
+
+The lint check runs automatically on every pull request and push to `main` or `develop` via GitHub Actions. The config lives in [.eslintrc.json](.eslintrc.json) and includes Apps Script globals (`SpreadsheetApp`, `DocumentApp`, `Logger`, etc.) so they don't appear as undefined variable errors.
+
+---
+
 ## Important Note
 
 **Avery 5160 and 5260 are identical products** — same dimensions, same layout. The difference is paper finish (5160 is matte white, 5260 is clear).

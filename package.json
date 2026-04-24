@@ -1,0 +1,12 @@
+{
+  "name": "label-maker-apps-script",
+  "version": "1.0.0",
+  "description": "Google Apps Script for generating Avery label sheets from Google Sheets data",
+  "license": "MIT",
+  "scripts": {
+    "lint": "eslint *.gs"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0"
+  }
+}
