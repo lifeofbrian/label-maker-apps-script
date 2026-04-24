@@ -1,5 +1,7 @@
 # Avery Label Generator
 
+[![Lint](https://github.com/lifeofbrian/label-maker-apps-script/actions/workflows/lint.yml/badge.svg)](https://github.com/lifeofbrian/label-maker-apps-script/actions/workflows/lint.yml)
+
 A Google Apps Script that converts address data from a Google Sheet into a professionally formatted Google Doc ready for printing on Avery labels.
 
 ---
