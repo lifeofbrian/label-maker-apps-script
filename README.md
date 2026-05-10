@@ -124,9 +124,11 @@ Labels are placed in a single borderless table starting on page 2 (after the sum
 = 612pt = 8.5"
 ```
 
-Rows are set to `setAllowBreakAcrossPages(false)` so they always move as a unit to the next page. Since 10 rows × 72pt = 720pt = the page height minus margins exactly, rows paginate naturally to each new Avery sheet without explicit page breaks.
+Rows are set to `setAllowBreakAcrossPages(false)` so they always move as a unit to the next page. Since 10 rows × 72pt = 720pt fits within the content area, rows paginate naturally to each new Avery sheet without explicit page breaks.
 
-The summary page on page 1 absorbs the mandatory Google Docs leading paragraph (which cannot be removed via Apps Script), so all label pages start with a clean 36pt top margin and consistent 30-label alignment.
+Label pages use a top margin matching the Avery spec (e.g. 36pt = 0.5" for 5160) and a bottom margin of 0. The Avery sheet's bottom dead zone is blank physical space on the paper — it does not need to be a Google Docs page margin. Setting it to 0 ensures the implicit empty paragraph that Google Docs appends after every table has room to exist without pushing onto a new page.
+
+The summary page on page 1 absorbs the mandatory Google Docs leading paragraph (which cannot be removed via Apps Script), so all label pages start with a clean top margin and consistent label alignment.
 
 ### Width Estimation Formula
 
@@ -193,8 +195,9 @@ Edit `Config.gs` to change defaults:
 
 | Constant | Default | Purpose |
 |----------|---------|---------|
-| `LABEL_COLUMN` | `"B"` | Sheet column containing label text |
 | `LABEL_START_ROW` | `2` | First row with label data (skips header) |
+
+The label column is auto-detected from the header row — the script finds the first column whose header contains "Address" (case-insensitive). No configuration needed as long as your sheet has an Address column header.
 
 To add support for other Avery label sizes, add a new entry to `LABEL_SPECS` in `LabelSpecs.gs`, then add a menu item and a one-line wrapper function in `LabelMaker.gs`.
 
