@@ -193,7 +193,6 @@ function appendLabelRows(body, data, spec) {
       const cell = row.appendTableCell(text);
       cell.setWidth(spec.widthPt);
       cell.setVerticalAlignment(DocumentApp.VerticalAlignment.TOP);
-      if (typeof cell.setMinimumHeight === 'function') cell.setMinimumHeight(spec.heightPt);
       if (typeof cell.setBorderWidth === 'function') cell.setBorderWidth(0);
       if (typeof cell.setBorderColor === 'function') cell.setBorderColor('#ffffff');
       cell.setPaddingTop(spec.paddingTopPt);
@@ -208,7 +207,6 @@ function appendLabelRows(body, data, spec) {
       if (c < spec.columnsPerRow - 1) {
         const spacer = row.appendTableCell('');
         spacer.setWidth(spec.columnGapPt);
-        if (typeof spacer.setMinimumHeight === 'function') spacer.setMinimumHeight(spec.heightPt);
         if (typeof spacer.setBorderWidth === 'function') spacer.setBorderWidth(0);
         if (typeof spacer.setBorderColor === 'function') spacer.setBorderColor('#ffffff');
         setCellParagraphSpacing(spacer);
