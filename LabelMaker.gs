@@ -149,12 +149,6 @@ function createLabelsAllFormats() {
     body.setMarginRight(spec.marginRightPt);
 
     appendLabelRows(body, data, spec);
-
-    // Page break between formats (not after the last one).
-    if (f < formatKeys.length - 1) {
-      body.appendParagraph('');
-      body.appendPageBreak();
-    }
   }
 
   doc.saveAndClose();
@@ -180,39 +174,47 @@ function createLabelsAllFormats() {
  */
 function appendLabelRows(body, data, spec) {
   const usableWidthPt = spec.widthPt - spec.paddingLeftPt - spec.paddingRightPt;
-  const table = createLabelTable(body);
 
+  // Build a 2D array of cell text for all rows, including spacer columns.
+  // Passing a pre-filled 2D array to body.appendTable() avoids the trailing
+  // implicit paragraph that appendTable() + appendTableRow() produces, which
+  // would otherwise create a blank page after the last label row.
+  const cellData = [];
   for (let i = 0; i < data.length; i += spec.columnsPerRow) {
-    const row = table.appendTableRow();
+    const rowData = [];
+    for (let c = 0; c < spec.columnsPerRow; c++) {
+      rowData.push(data[i + c] || '');
+      if (c < spec.columnsPerRow - 1) rowData.push(''); // spacer column
+    }
+    cellData.push(rowData);
+  }
+
+  const table = body.appendTable(cellData);
+  if (typeof table.setBorderWidth === 'function') table.setBorderWidth(0);
+  if (typeof table.setBorderColor === 'function') table.setBorderColor('#ffffff');
+  if (typeof table.setBorderStyle === 'function') table.setBorderStyle(DocumentApp.BorderStyle.NONE);
+
+  // Now style each row and cell using the already-populated table.
+  for (let i = 0; i < table.getNumRows(); i++) {
+    const row = table.getRow(i);
     if (typeof row.setMinimumHeight === 'function') row.setMinimumHeight(spec.heightPt);
     if (typeof row.setAllowBreakAcrossPages === 'function') row.setAllowBreakAcrossPages(false);
 
+    const dataRowIndex = i * spec.columnsPerRow;
+    let colIndex = 0;
     for (let c = 0; c < spec.columnsPerRow; c++) {
-      const text = data[i + c] || '';
+      const cell = row.getCell(colIndex);
+      const text = data[dataRowIndex + c] || '';
 
-      const cell = row.appendTableCell(text);
       cell.setWidth(spec.widthPt);
       cell.setVerticalAlignment(DocumentApp.VerticalAlignment.TOP);
-      if (typeof cell.setMinimumHeight === 'function') cell.setMinimumHeight(spec.heightPt);
       if (typeof cell.setBorderWidth === 'function') cell.setBorderWidth(0);
       if (typeof cell.setBorderColor === 'function') cell.setBorderColor('#ffffff');
       cell.setPaddingTop(spec.paddingTopPt);
       cell.setPaddingBottom(spec.paddingBottomPt);
       cell.setPaddingLeft(spec.paddingLeftPt);
       cell.setPaddingRight(spec.paddingRightPt);
-      // appendTableCell splits \n into paragraphs. Without zeroing their
-      // spacing, accumulated paragraph spacing pushes rows past spec.heightPt,
-      // causing fewer rows per page than the label sheet expects.
       setCellParagraphSpacing(cell);
-
-      if (c < spec.columnsPerRow - 1) {
-        const spacer = row.appendTableCell('');
-        spacer.setWidth(spec.columnGapPt);
-        if (typeof spacer.setMinimumHeight === 'function') spacer.setMinimumHeight(spec.heightPt);
-        if (typeof spacer.setBorderWidth === 'function') spacer.setBorderWidth(0);
-        if (typeof spacer.setBorderColor === 'function') spacer.setBorderColor('#ffffff');
-        setCellParagraphSpacing(spacer);
-      }
 
       if (text) {
         const fontSize = pickFontSizeToAvoidWrap(text, usableWidthPt, spec);
@@ -220,7 +222,33 @@ function appendLabelRows(body, data, spec) {
         edit.setFontFamily('Arial');
         edit.setFontSize(fontSize);
       }
+
+      colIndex++;
+
+      if (c < spec.columnsPerRow - 1) {
+        const spacer = row.getCell(colIndex);
+        spacer.setWidth(spec.columnGapPt);
+        if (typeof spacer.setBorderWidth === 'function') spacer.setBorderWidth(0);
+        if (typeof spacer.setBorderColor === 'function') spacer.setBorderColor('#ffffff');
+        setCellParagraphSpacing(spacer);
+        colIndex++;
+      }
     }
+  }
+
+  // Shrink the implicit trailing paragraph Google Docs adds after every table.
+  // We cannot delete it, so make it as small as possible so it doesn't push a new page.
+  const last = body.getChild(body.getNumChildren() - 1);
+  if (last.getType() === DocumentApp.ElementType.PARAGRAPH) {
+    const p = last.asParagraph();
+    p.setAttributes({
+      [DocumentApp.Attribute.SPACING_BEFORE]: 0,
+      [DocumentApp.Attribute.SPACING_AFTER]: 0,
+      [DocumentApp.Attribute.LINE_SPACING]: 1.0,
+      [DocumentApp.Attribute.FONT_SIZE]: 1,
+      [DocumentApp.Attribute.MARGIN_TOP]: 0,
+      [DocumentApp.Attribute.MARGIN_BOTTOM]: 0
+    });
   }
 }
 
@@ -300,10 +328,17 @@ function buildSummaryPage(body, data, sheetName, labelType, spec, dateTimeStr) {
     });
   }
 
-  // appendPageBreak() requires a paragraph as the last body element —
-  // it throws if called after a table.
-  body.appendParagraph('');
-  body.appendPageBreak();
+  // Walk body children in reverse to find the last direct-body paragraph
+  // (skips paragraphs inside table cells, which body.getParagraphs() includes).
+  // Append the page break inline so the label table starts on a fresh page
+  // without creating an extra standalone paragraph that would produce a blank page.
+  for (let i = body.getNumChildren() - 1; i >= 0; i--) {
+    const el = body.getChild(i);
+    if (el.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      el.asParagraph().appendPageBreak();
+      break;
+    }
+  }
 }
 
 function buildFormatHeaderPage(body, spec, totalLabels, labelPages, dateTimeStr, sheetName, isFirst) {
@@ -336,9 +371,6 @@ function buildFormatHeaderPage(body, spec, totalLabels, labelPages, dateTimeStr,
   addPara('  • Scale: 100% — do NOT use "Fit to page"');
   addPara('  • Paper: Letter (8.5 × 11 in)');
   addPara('  • Labels start on the next page');
-
-  body.appendParagraph('');
-  body.appendPageBreak();
 }
 
 // =============================================================
@@ -437,9 +469,33 @@ function estimateLineWidthPt(line, fontSize) {
 // Data helpers
 // =============================================================
 
+/**
+ * Finds the first column header containing "Address" (case-insensitive).
+ * Returns the column letter (e.g., "B") or throws if not found.
+ */
+function findAddressColumn(sheet) {
+  const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  for (let c = 0; c < headerRow.length; c++) {
+    if (headerRow[c] && headerRow[c].toString().toLowerCase().includes('address')) {
+      return columnLetterFromIndex(c);
+    }
+  }
+  throw new Error('No column header containing "Address" found in row 1. Please add a header row with an "Address" column.');
+}
+
+function columnLetterFromIndex(index) {
+  let letter = '';
+  while (index >= 0) {
+    letter = String.fromCharCode((index % 26) + 65) + letter;
+    index = Math.floor(index / 26) - 1;
+  }
+  return letter;
+}
+
 function readLabelData(sheet) {
+  const addressColumn = findAddressColumn(sheet);
   const lastRow = sheet.getLastRow();
-  const range = `${LABEL_COLUMN}${LABEL_START_ROW}:${LABEL_COLUMN}${lastRow}`;
+  const range = `${addressColumn}${LABEL_START_ROW}:${addressColumn}${lastRow}`;
   Logger.log(`📍 Reading data from range: ${range}`);
   return sheet
     .getRange(range)
