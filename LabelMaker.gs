@@ -435,9 +435,33 @@ function estimateLineWidthPt(line, fontSize) {
 // Data helpers
 // =============================================================
 
+/**
+ * Finds the first column header containing "Address" (case-insensitive).
+ * Returns the column letter (e.g., "B") or throws if not found.
+ */
+function findAddressColumn(sheet) {
+  const headerRow = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  for (let c = 0; c < headerRow.length; c++) {
+    if (headerRow[c] && headerRow[c].toString().toLowerCase().includes('address')) {
+      return columnLetterFromIndex(c);
+    }
+  }
+  throw new Error('No column header containing "Address" found in row 1. Please add a header row with an "Address" column.');
+}
+
+function columnLetterFromIndex(index) {
+  let letter = '';
+  while (index >= 0) {
+    letter = String.fromCharCode((index % 26) + 65) + letter;
+    index = Math.floor(index / 26) - 1;
+  }
+  return letter;
+}
+
 function readLabelData(sheet) {
+  const addressColumn = findAddressColumn(sheet);
   const lastRow = sheet.getLastRow();
-  const range = `${LABEL_COLUMN}${LABEL_START_ROW}:${LABEL_COLUMN}${lastRow}`;
+  const range = `${addressColumn}${LABEL_START_ROW}:${addressColumn}${lastRow}`;
   Logger.log(`📍 Reading data from range: ${range}`);
   return sheet
     .getRange(range)

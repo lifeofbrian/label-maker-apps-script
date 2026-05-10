@@ -8,6 +8,5 @@
  * ============================================================
  */
 
-const LABEL_COLUMN = "B";    // Column containing label text
 const LABEL_START_ROW = 2;   // First row with data (row 1 assumed to be a header)
 

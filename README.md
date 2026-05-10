@@ -36,23 +36,18 @@ Perfect for: holiday cards, newsletters, fundraising campaigns, or any bulk mail
 
 ### 1. Prepare Your Data
 
-In your Google Sheet, add label text to **Column B** starting at **B2**:
+In your Google Sheet, add a header row (row 1) with a column named **Address**. Starting at row 2, put your label text in that column:
 
 ```
-Column B (starting at B2):
-Smith Family
-123 Main St
-Springfield, IL 62701
-
-Jane Doe
-456 Elm Ave Apt 7
-Shelbyville, IL 62565
+Row 1:  Name | Address | City | State | ZIP
+Row 2:  Smith Family | 123 Main St | Springfield | IL | 62701
+Row 3:  Jane Doe | 456 Elm Ave Apt 7 | Shelbyville | IL | 62565
 ```
 
-**Important:** Each cell should contain the complete label text with line breaks using `CHAR(10)`. Example formula:
+**Important:** Each cell in the Address column should contain the complete label text with line breaks using `CHAR(10)`. Example formula:
 
 ```
-=A2&CHAR(10)&B2&CHAR(10)&C2
+=B2&CHAR(10)&C2&CHAR(10)&D2&CHAR(10)&E2
 ```
 
 ### 2. Install the Script
